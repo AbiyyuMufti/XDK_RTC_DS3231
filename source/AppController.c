@@ -56,9 +56,12 @@
 
 /* own header files */
 #include "AppController.h"
+#include "I2CHandler.h"
+#include "DS3231Handler.h"
 
 /* system header files */
 #include <stdio.h>
+#include <time.h>
 
 /* additional interface header files */
 #include "BCDS_Assert.h"
@@ -81,6 +84,7 @@ static xTaskHandle AppControllerHandle = NULL;/**< OS thread handle for Applicat
 
 /* local functions ********************************************************** */
 
+
 /**
  * @brief Responsible for controlling application control flow.
  * Any application logic which is blocking in nature or fixed time dependent
@@ -95,10 +99,46 @@ static void AppControllerFire(void* pvParameters)
 
     /* A function that implements a task must not exit or attempt to return to
      its caller function as there is nothing to return to. */
+
+    bool USE_DS3231 = ds3231_exists();
+    if(USE_DS3231)
+    {
+    	printf("DS3231 Exists!\n");
+    	ds3231_initialize();
+    }
+
     while (1)
     {
-        /* code to implement application control flow */
-        vTaskDelay(XDK_APP_DELAY);
+    	if(USE_DS3231)
+    	{
+    		static int rtc_counter = 0;
+        	RTC_Time rtc_time;
+        	char date_time_to_print[50] = {0};
+        	if(RETCODE_OK == ds3231_get_time(&rtc_time))
+        	{
+        		convert_rtc_to_iso8601(&rtc_time, date_time_to_print, 50);
+        		printf(" %s\n", date_time_to_print);
+        		rtc_counter = xTaskGetTickCount();
+        	}
+        	else
+        	{
+        		if(xTaskGetTickCount() - rtc_counter > 5000){
+        			rtc_counter = xTaskGetTickCount();
+        			USE_DS3231 = ds3231_exists();
+        			printf("%d\n", rtc_counter);
+        		}
+        	}
+    	}
+    	else
+    	{
+    	    USE_DS3231 = ds3231_exists();
+    	    if(USE_DS3231)
+    	    {
+    	    	printf("DS3231 Exists!\n");
+    	    	ds3231_initialize();
+    	    }
+    	}
+        vTaskDelay(1000);
     }
 }
 
@@ -152,6 +192,11 @@ static void AppControllerSetup(void * param1, uint32_t param2)
     /* @todo - Setup the necessary modules required for the application */
 
     retcode = CmdProcessor_Enqueue(AppCmdProcessor, AppControllerEnable, NULL, UINT32_C(0));
+    if(RETCODE_OK == retcode)
+    {
+    	retcode = I2C_Initialize(AppCmdProcessor);
+    }
+
     if (RETCODE_OK != retcode)
     {
         printf("AppControllerSetup : Failed \r\n");
